@@ -1,0 +1,22 @@
+# ACCS — AI Capture Course Sound 依赖
+# 使用 `py -3.9 -m venv .venv && .venv\Scripts\python -m pip install -r requirements.txt`
+
+# 转录引擎(推荐, 实时低延迟)
+faster-whisper>=1.0
+# 可选: 使用 PyTorch 的官方 openai-whisper(复用已装好的 torch)
+openai-whisper>=20231117
+
+# 音频采集
+soundcard>=0.4            # Windows 系统音频环回(抓取网课/播放声音)
+sounddevice>=0.4          # 麦克风(PortAudio)
+soundfile>=0.12           # 读取音频文件
+
+# VAD 与数据
+onnxruntime>=1.16         # Silero VAD
+numpy>=1.24
+PyYAML>=6.0
+
+# Web 界面
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.24               # 调用本机 Ollama 做翻译

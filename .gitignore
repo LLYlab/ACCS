@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# 运行输出
+output/
+*.wav
+*.mp3
+*.m4a
+*.mp4
+
+models/
+

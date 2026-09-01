@@ -1,0 +1,74 @@
+# ============================================================
+# ACCS — AI Capture Course Sound 配置
+# 通过本机 Whisper 对「讲师讲课音频」进行实时语音识别。
+# ============================================================
+
+audio:
+  # 音频来源: system(系统播放声音/网课) | mic(麦克风) | file(读文件)
+  source: system
+  # 后端: auto | soundcard | sounddevice
+  #   system 需要在 Windows 上使用 soundcard 的 WASAPI 环回
+  #   mic    可用 soundcard 或 sounddevice
+  backend: auto
+  # 设备关键字(为空 = 系统默认)。用于从多个设备中按名称/ID 匹配。
+  device: ""
+  # 单独为麦克风 / 系统环回指定设备关键字(优先于上面的 device)
+  mic_device: ""
+  system_device: ""
+  # source=file 时读取的音频文件路径(支持 ffmpeg 能解码的任何格式)
+  file: ""
+  # 采样率: Whisper 使用 16kHz。尽量让后端直接输出 16k,避免重采样损耗
+  sample_rate: 16000
+  # 采集帧大小(毫秒),决定 VAD 处理粒度。Silero VAD 需要帧长为 512 的整数倍,
+  # 16kHz 下 256ms = 4096 样本 = 8 个 512 窗口,较均衡
+  frame_ms: 256
+  # 声道数(采集时),转录时统一转单声道
+  channels: 1
+
+vad:
+  enabled: true
+  # 语音概率阈值,越高越严格
+  threshold: 0.5
+  # 判定为一个语音片段的最短持续时间(毫秒)
+  min_speech_ms: 500
+  # 在检测到说话前,向前补的音频(毫秒),避免截掉开头
+  prepend_ms: 300
+  # 在检测到说话结束后,向后补的音频(毫秒),避免截掉字尾
+  pad_ms: 200
+  # 静音多久(毫秒)判定一个片段结束并送转录
+  silence_ms: 800
+  # 一个片段最长时长(毫秒),超过则强制送转录,防止无限增长
+  max_segment_ms: 30000
+
+transcriber:
+  # 引擎: sherpa_onnx(中文最佳/带标点/双语混合) | faster_whisper | openai_whisper | funasr
+  engine: sherpa_onnx
+  # sherpa-onnx 中文模型目录(留空=自动探测 models/ 下的 SenseVoice / 双语 zipformer)
+  sherpa_onnx_model: ""
+  sherpa_onnx_type: auto
+  # 模型: tiny|base|small|medium|large-v3,或本地模型目录/文件路径 (Whisper 用)
+  model: small
+  # 设备: auto | cpu | cuda(注意 faster-whisper 的 GPU 需要 cuDNN)
+  device: auto
+  # 计算精度: auto | int8 | float16 | int8_float16 | float32
+  #   CPU 建议 int8(最快);GPU 建议 float16 或 int8_float16
+  compute_type: auto
+  # 语言: ""=自动检测; "zh" 中文; "en" 英文
+  language: ""
+  beam_size: 5
+  # 是否输出词级时间戳
+  word_timestamps: true
+  # 是否让引擎自带 VAD(我们通常在流水线里已做分块,默认关闭)
+  vad_filter: false
+
+output:
+  # 输出方式: terminal(实时终端) | file(txt) | srt(字幕) | jsonl | all
+  mode: terminal
+  # 输出文件目录
+  base_dir: output
+  # 指定输出文件路径(为空则自动命名,按 base_dir/<时间戳>)
+  file: ""
+  # 实时把转写结果打印到终端
+  show_transcript_live: true
+  # 在终端里同时显示本次片段的语言(当 language 为空时)
+  show_language: true
