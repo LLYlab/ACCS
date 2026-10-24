@@ -6,8 +6,10 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-# 项目根目录(= config.yaml 所在目录)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from .paths import app_root as _app_root
+
+# 项目根目录(= config.yaml 所在目录；打包后为 exe 所在目录)
+PROJECT_ROOT = _app_root()
 DEFAULT_CONFIG_PATH = os.environ.get(
     "ACCS_CONFIG", os.path.join(PROJECT_ROOT, "config.yaml")
 )
@@ -35,20 +37,27 @@ class AudioConfig:
 class VadConfig:
     enabled: bool = True
     threshold: float = 0.5
+    # 结束阈值 = threshold * end_ratio（双阈值滞后，避免抖动切碎句子）
+    end_ratio: float = 0.6
     min_speech_ms: int = 500
     prepend_ms: int = 300
     pad_ms: int = 200
     silence_ms: int = 800
     max_segment_ms: int = 30000
+    # 相邻片段重叠（毫秒），0 = 不重叠
+    overlap_ms: int = 0
 
 
 @dataclass
 class TranscriberConfig:
-    engine: str = "sherpa_onnx"     # sherpa_onnx | faster_whisper | openai_whisper | funasr
+    engine: str = "sherpa_onnx"     # sherpa_onnx | faster_whisper | openai_whisper | funasr | vosk | whisper_cpp | browser
     model: str = "small"            # tiny/base/small/medium/large-v3 或本地路径
     funasr_model: str = "paraformer-zh"  # FUNASR 中文模型: paraformer-zh / SenseVoiceSmall ...
     sherpa_onnx_model: str = ""     # sherpa-onnx 模型目录(空=自动探测内置 models/)
-    sherpa_onnx_type: str = "auto"  # auto | sense_voice | transducer
+    sherpa_onnx_type: str = "auto"  # auto | sense_voice | paraformer | transducer
+    vosk_model: str = ""            # Vosk 模型目录
+    whisper_cpp_bin: str = ""       # whisper-cli(.exe) 路径
+    whisper_cpp_model: str = ""     # ggml 模型路径
     device: str = "auto"            # auto | cpu | cuda
     compute_type: str = "auto"      # auto | int8 | float16 | int8_float16 | float32
     language: str = ""              # "" = auto

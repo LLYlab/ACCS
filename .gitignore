@@ -14,4 +14,4 @@ output/
 *.mp4
 
 models/
-
+*.spec

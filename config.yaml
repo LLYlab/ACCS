@@ -1,74 +1,85 @@
 # ============================================================
-# ACCS — AI Capture Course Sound 配置
-# 通过本机 Whisper 对「讲师讲课音频」进行实时语音识别。
+# ACCS — AI Capture Course Sound 配置 v2
+# 本机实时语音识别（多引擎）+ 翻译 + 导出
 # ============================================================
 
 audio:
   # 音频来源: system(系统播放声音/网课) | mic(麦克风) | file(读文件)
   source: system
   # 后端: auto | soundcard | sounddevice
-  #   system 需要在 Windows 上使用 soundcard 的 WASAPI 环回
-  #   mic    可用 soundcard 或 sounddevice
   backend: auto
-  # 设备关键字(为空 = 系统默认)。用于从多个设备中按名称/ID 匹配。
+  # 设备关键字(为空 = 系统默认)
   device: ""
-  # 单独为麦克风 / 系统环回指定设备关键字(优先于上面的 device)
   mic_device: ""
   system_device: ""
-  # source=file 时读取的音频文件路径(支持 ffmpeg 能解码的任何格式)
+  # source=file 时的音频文件路径
   file: ""
-  # 采样率: Whisper 使用 16kHz。尽量让后端直接输出 16k,避免重采样损耗
+  # 采样率: Whisper / SenseVoice 使用 16kHz
   sample_rate: 16000
-  # 采集帧大小(毫秒),决定 VAD 处理粒度。Silero VAD 需要帧长为 512 的整数倍,
-  # 16kHz 下 256ms = 4096 样本 = 8 个 512 窗口,较均衡
+  # 采集帧大小(毫秒)
   frame_ms: 256
-  # 声道数(采集时),转录时统一转单声道
+  # 声道数
   channels: 1
 
 vad:
   enabled: true
-  # 语音概率阈值,越高越严格
+  # 语音概率阈值(开始)，越高越严格
   threshold: 0.5
-  # 判定为一个语音片段的最短持续时间(毫秒)
+  # 结束阈值 = threshold * end_ratio（双阈值滞后，避免切碎句子）
+  end_ratio: 0.6
+  # 判定为一个语音片段的最短时长(毫秒)
   min_speech_ms: 500
-  # 在检测到说话前,向前补的音频(毫秒),避免截掉开头
+  # 说话前/后补的音频(毫秒)
   prepend_ms: 300
-  # 在检测到说话结束后,向后补的音频(毫秒),避免截掉字尾
   pad_ms: 200
-  # 静音多久(毫秒)判定一个片段结束并送转录
+  # 静音多久判定片段结束(毫秒)
   silence_ms: 800
-  # 一个片段最长时长(毫秒),超过则强制送转录,防止无限增长
+  # 单段最长时长(毫秒)，超过则在能量谷切开
   max_segment_ms: 30000
+  # 相邻片段重叠(毫秒)，0 = 不重叠；200 可减少边界丢字
+  overlap_ms: 0
 
 transcriber:
-  # 引擎: sherpa_onnx(中文最佳/带标点/双语混合) | faster_whisper | openai_whisper | funasr
+  # 引擎:
+  #   sherpa_onnx    SenseVoice / Paraformer / 流式 Zipformer（中文最佳，带标点）
+  #   faster_whisper CTranslate2 Whisper
+  #   openai_whisper 原版 Whisper（PyTorch）
+  #   funasr         阿里 FunASR
+  #   vosk           轻量离线
+  #   whisper_cpp    whisper.cpp（GGML）
+  #   browser        浏览器 Web Speech（由前端完成，可能依赖厂商在线服务）
   engine: sherpa_onnx
-  # sherpa-onnx 中文模型目录(留空=自动探测 models/ 下的 SenseVoice / 双语 zipformer)
-  sherpa_onnx_model: ""
-  sherpa_onnx_type: auto
-  # 模型: tiny|base|small|medium|large-v3,或本地模型目录/文件路径 (Whisper 用)
+
+  # Whisper 模型（faster_whisper / openai_whisper 用）
   model: small
-  # 设备: auto | cpu | cuda(注意 faster-whisper 的 GPU 需要 cuDNN)
-  device: auto
-  # 计算精度: auto | int8 | float16 | int8_float16 | float32
-  #   CPU 建议 int8(最快);GPU 建议 float16 或 int8_float16
-  compute_type: auto
-  # 语言: ""=自动检测; "zh" 中文; "en" 英文
-  language: ""
+
+  # sherpa-onnx
+  sherpa_onnx_model: ""      # 留空=自动探测 models/ 下的模型
+  sherpa_onnx_type: auto     # auto | sense_voice | paraformer | transducer
+
+  # FunASR
+  funasr_model: paraformer-zh
+
+  # Vosk
+  vosk_model: ""             # 留空=自动探测 models/vosk-*
+
+  # whisper.cpp
+  whisper_cpp_bin: ""        # whisper-cli(.exe) 路径，留空=查 PATH
+  whisper_cpp_model: ""      # ggml-*.bin 路径
+
+  # 通用
+  device: auto               # auto | cpu | cuda
+  compute_type: auto         # auto | int8 | float16 | int8_float16 | float32
+  language: ""               # ""=自动
   beam_size: 5
-  # 是否输出词级时间戳
   word_timestamps: true
-  # 是否让引擎自带 VAD(我们通常在流水线里已做分块,默认关闭)
   vad_filter: false
 
 output:
-  # 输出方式: terminal(实时终端) | file(txt) | srt(字幕) | jsonl | all
+  # terminal | file | srt | jsonl | all
+  # all: 额外写出 md / vtt / json / csv
   mode: terminal
-  # 输出文件目录
   base_dir: output
-  # 指定输出文件路径(为空则自动命名,按 base_dir/<时间戳>)
   file: ""
-  # 实时把转写结果打印到终端
   show_transcript_live: true
-  # 在终端里同时显示本次片段的语言(当 language 为空时)
   show_language: true

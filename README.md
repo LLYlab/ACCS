@@ -1,154 +1,157 @@
 # ACCS — AI Capture Course Sound
 
-用**本机运行的 Whisper**对讲课音频做**实时语音识别**,把讲师讲的话实时转成文字,并可调用**本机 DeepSeek R1** 把英文实时翻成中文。
+**把讲课音频变成可检索、可交付的文字稿。**
+本机实时转写 → 自动分段 → 英译中 → 一键导出（双语字幕 / Word / ZIP）。
 
-> 目标场景: 一边播放网课/讲座/录屏(或直接对麦克风说话),一边实时得到中文/英文文字稿 + 中文翻译。
+![工作台](docs/ui.png)
 
----
-
-## 特性
-
-- **带 Web UI**: 浏览器打开即可选择音频来源、开始/停止、实时看到转写与翻译。
-- **实时**采集 + 实时转写: 采集到说话就切分、立刻转写,不阻塞后续音频。
-- **多种音频来源**:
-  - `system` — 抓取**系统正在播放的声音**(网课/讲座/录屏) —— Windows 上通过 WASAPI 环回。
-  - `mic` — 用**麦克风**收音。
-  - `file` — 对**本地音频文件**离线转写(用于测试/复盘)。
-- **本机运行**: 音频不外传,完全本地推理;翻译也走本机 Ollama。
-- **VAD 端点切分**: 用 Silero VAD 自动判断说话起止,把连续语音切成句子,避免把整堂课当一段。
-- **可配置引擎**: `faster-whisper`(推荐,实时低延迟)或 `openai-whisper`(复用已装好的 PyTorch)。
-- **多种输出**: UI 实时显示 + CLI 落盘 `txt` / `srt` / `jsonl`。
+> 全程本地运行：音频不出本机，翻译与分析走本机 Ollama。
+> 唯一例外是「浏览器识别」模式——它用浏览器的 Web Speech API，可能依赖厂商在线服务，界面上会明确提示。
 
 ---
 
-## 环境要求
+## 这一版做了什么
 
-- Python 3.9+(已在 3.9.13 验证)
-- 本机安装过 `ffmpeg`(用于音频解码,`faster-whisper` 依赖)。可用 `winget install Gyan.FFmpeg`。
-- (可选)GPU: 若要 GPU 加速,见下方「GPU 加速」一节。
+| 方向 | v1 | v2 |
+|---|---|---|
+| **分段** | 逐帧拼接、固定 800ms 静音、30s 硬切 | 预分配缓冲、双阈值滞后、能量谷切分、可配置重叠 |
+| **引擎** | Whisper ×2 | 7 个：sherpa-onnx、faster-whisper、openai-whisper、FunASR、Vosk、whisper.cpp、浏览器 |
+| **界面** | 单页表单 | 三栏工作台：设置 / 实时字幕 / 导出分析，深浅色、搜索、章节跳转 |
+| **导出** | txt / md / srt / jsonl | + 双语 SRT、VTT、DOCX、CSV、结构化 JSON、自动分章、ZIP 打包 |
+| **交付** | 源码 | 源码 + 一键脚本 + Windows exe |
 
-## 安装
+## 快速开始
+
+### 方式一：exe（推荐给同学）
+
+1. 解压 `ACCS-windows.zip`
+2. 把 `models/` 放到 `ACCS.exe` 旁边（自带模型见下）
+3. 双击 `启动.bat` → 浏览器打开 <http://127.0.0.1:8000>
+
+### 方式二：源码
 
 ```powershell
+git clone https://github.com/LLYlab/ACCS.git
 cd ACCS
-py -3.9 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\setup.bat            # 建 venv + 装依赖（首次约 10 分钟）
+.\启动.bat             # 或 .venv\Scripts\python -m accs.web --port 8000
 ```
 
-## 运行
+> 需要 Python 3.9+、ffmpeg（`winget install Gyan.FFmpeg`）。
+
+### 模型放哪
+
+```
+ACCS/
+└── models/
+    ├── csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/   # 推荐，228 MB
+    ├── vosk-model-small-cn-0.22/                                       # 可选
+    └── ggml-small.bin                                                  # whisper.cpp 用
+```
+
+界面左侧「模型目录」会自动扫描 `models/` 并列出，选「自动探测」也行。
+
+## 四个改进点
+
+### 1. 分段（`accs/segmenter.py`）
+
+- **双阈值 + 滞后**：开始 0.5、结束 0.3×阈值，一句话不会被 VAD 抖动切碎
+- **能量谷切分**：超过最长片段时，在能量最低处切，而不是硬切在词中间
+- **前置补音 / 尾部 pad / 可选重叠**：边界字不容易丢
+- **O(1) 追加**：帧列表 + 定稿时一次 concat，长片段不再 O(n²)
+
+### 2. 引擎（`accs/transcriber.py`）
+
+| 引擎 | 流式 | 时间戳 | 标点 | 说明 |
+|---|---|---|---|---|
+| sherpa-onnx | 视模型 | — | ✅ | SenseVoice / Paraformer / 流式 Zipformer，中文最佳 |
+| faster-whisper | — | ✅ | ✅ | CTranslate2，实时性好 |
+| openai-whisper | — | ✅ | ✅ | 复用 PyTorch |
+| FunASR | — | ✅ | ✅ | 阿里达摩院 |
+| Vosk | ✅ | ✅ | — | 轻量，CPU 友好 |
+| whisper.cpp | — | ✅ | ✅ | GGML，低配机器 |
+| 浏览器 | ✅ | — | — | Web Speech API，**可能非本地** |
+
+界面会显示每个引擎是否已安装；未安装的会标注缺什么。
+
+### 3. 界面（`accs/static/`）
+
+- 三栏：采集设置 / 实时字幕 / 导出与分析
+- 实时字幕：搜索、跟随、字号、双语对照、时间戳
+- 右侧：导出格式网格、按停顿自动分章、LLM 纠错与知识点
+- 深浅色、移动端自适应、设置持久化
+- 浏览器模式会在页面内直接调用麦克风并回传结果
+
+### 4. 导出（`accs/exporters.py`）
+
+| 格式 | 内容 |
+|---|---|
+| ZIP | 下述全部打包（含 docx） |
+| SRT（双语） | 原文 + 译文两行 |
+| DOCX | 标题、元信息、章节、时间戳、译文 |
+| CSV | 时间/时长/语言/原文/译文 |
+| JSON | 结构化片段 + 章节 + 元信息 |
+| MD | 带章节与引用块 |
+| TXT / VTT / JSONL | 常规 |
+
+自动分章：相邻片段间隔 > 2.5 s 视为换章节，太短的章节自动并入上一章。
+
+## 命令行
 
 ```powershell
-# 抓取系统正在播放的声音(网课/讲座) —— 最常用
-.\.venv\Scripts\python.exe -m accs --source system
+# 系统声音（网课/讲座）
+.\.venv\Scripts\python -m accs --source system --engine sherpa_onnx
 
-# 用麦克风收音
-.\.venv\Scripts\python.exe -m accs --source mic
+# 本地文件 + 全套导出
+.\.venv\Scripts\python -m accs --source file --file lecture.m4a --output all
 
-# 对本地文件离线转写(中文, small 模型)
-.\.venv\Scripts\python.exe -m accs --source file --file lecture.m4a --language zh --output all
-
-# 先用仓库附带的测试音频快速试一把(中文, tiny 模型)
-.\.venv\Scripts\python.exe -m accs --source file --file speech_zh.wav --language zh --output all
-
-# 查看可用音频设备(确认系统环回/麦克风的名称)
-.\.venv\Scripts\python.exe -m accs --list-devices
+# 看有哪些音频设备
+.\.venv\Scripts\python -m accs --list-devices
 ```
 
-停止: 在终端按 `Ctrl+C`。
-
-### 常用参数
-
-| 参数 | 说明 |
-| --- | --- |
-| `--source system/mic/file` | 音频来源 |
-| `--model tiny/base/small/medium/large-v3` | Whisper 模型,越大越准、越慢 |
-| `--language zh/en/...` | 语言;留空自动检测 |
-| `--engine faster_whisper/openai_whisper` | 转录引擎 |
-| `--device-auto cpu/cuda` | 计算设备 |
-| `--output terminal/file/srt/jsonl/all` | 输出方式 |
-| `--output-file path` | 输出文件路径 |
-| `--no-vad` | 关闭 VAD,按固定窗口切分 |
-| `--silence-ms 800` | 判定句子结束的静音时长(毫秒) |
-
-所有配置也可在 `config.yaml` 中修改,命令行参数会覆盖它。
-
----
-
-## Web 界面(推荐)
-
-带界面的应用: 浏览器里选择音频来源、开始/停止,实时看到转写 + 英文→中文翻译。
-
-```powershell
-# 启动 Web 服务
-.\.venv\Scripts\python.exe -m accs.web --port 8000
-```
-
-然后浏览器打开 **http://127.0.0.1:8000** 。
-
-界面上你能:
-- 选音频来源(系统播放声音 / 麦克风 / 音频文件)。
-- 选 Whisper 模型、语言、引擎。
-- 开/关「英→中翻译」。
-- 填 LLM 地址与模型(默认 `http://127.0.0.1:11434` + `deepseek-r1:8b`)。
-
-> 翻译依赖本机 **Ollama** 跑 `deepseek-r1:8b`(你机器上已有,`ollama serve` 已在 11434 端口)。若想换模型或没开 Ollama,在界面里改 LLM 地址/模型,或取消勾选翻译。
-> R1 每次翻译约 10~20 秒,是**后台**跑的,不会卡住实时转写;转写会先出来,译文随后补上。
-
-> 文件模式: 在「音频文件」框填项目目录内的相对路径(如 `speech_en.wav`)。
-
-
-## GPU 加速
-
-- **faster-whisper**: GPU 需要 **CUDA + cuDNN**(CTranslate2)。未配置时会自动回退 CPU `int8`,也能实时用 `tiny/base`,但速度较慢。
-- **openai-whisper**: 复用已安装的 PyTorch。若你的 torch 是 CUDA 版(如 `torch 2.8.0+cu128`),直接 `--engine openai_whisper` 即可用 GPU。
-
-> 提示: 默认设备为空时,`--device-auto auto` 会自动探测。若在 `cuda` 上加载失败,程序会回退到 CPU `int8`。
-
----
+常用参数：`--engine`、`--model`、`--language`、`--silence-ms`、`--vad-threshold`、`--overlap-ms`、`--max-segment-ms`。
 
 ## 项目结构
 
 ```
-ACCS/
-├── accs/
-│   ├── __main__.py      CLI 入口 (python -m accs)
-│   ├── web.py           Web 服务入口 (python -m accs.web)
-│   ├── webapp.py        FastAPI + SSE 广播 + 流水线管理
-│   ├── translator.py    调用本机 Ollama(DeepSeek R1)做英→中翻译
-│   ├── config.py        配置加载(读 config.yaml + 命令行覆盖)
-│   ├── audio.py         音频采集: system(环回) / mic / file,多后端回退
-│   ├── vad.py           Silero VAD(端点检测),能量 VAD 作为兜底
-│   ├── transcriber.py   转录引擎: faster-whisper / openai-whisper
-│   ├── pipeline.py      流水线: 采集 → VAD 切分 → 转录 → 输出
-│   ├── output.py        输出: 实时终端 + txt/srt/jsonl
-│   └── static/index.html  Web 界面(单页,原生 JS)
-├── config.yaml          默认配置
-├── requirements.txt     依赖
-├── speech_zh.wav        中文测试音频
-├── speech_en.wav        英文测试音频(用于测试翻译)
-└── tests/test_logic.py  核心逻辑自检(无需硬件/模型)
+accs/
+  segmenter.py    分段器（双阈值 / 能量谷 / 重叠）
+  transcriber.py  引擎层（7 个引擎 + 能力表）
+  exporters.py    txt/md/srt/vtt/json/csv/docx/zip + 自动分章
+  pipeline.py     采集 → 分段 → 后台转录 → 输出
+  webapp.py       FastAPI + SSE + 导出/章节/分析接口
+  paths.py        源码/打包两种运行方式的路径解析
+  static/         三栏工作台（原生 JS，无构建）
+desktop 相关：无（v2 只保留 Web UI 与 CLI）
+tests/test_logic.py  10 组纯逻辑测试（分段 / 导出 / 配置）
+build_exe.ps1    PyInstaller 打包
 ```
 
-## 工作原理
+## 测试
 
-```
-[音频源: system/mic/file] --16kHz单声道帧--> [Silero VAD 端点检测]
-      |                                             |
-      |            检测到说话开始: 累积 + 前置补音        |
-      |            检测到静音/超长: 定稿当前片段           |
-      v                                             v
-[后台转录线程: Whisper 转写该片段]  -->  [输出: 终端打印 + 落盘 txt/srt/jsonl]
+```powershell
+.\.venv\Scripts\python.exe -X utf8 tests\test_logic.py
 ```
 
-- 采集与 VAD 在调用线程里实时跑,转录在后台线程;即使模型偏慢,也不影响继续采集。
-- 一句话说完(静音超过 `silence_ms`)就送一句去转,所以是一句一句实时出来的。
-
----
+覆盖：配置覆盖、SRT/VTT 时间格式、CLI 输出、分段（静音切分/过短丢弃/超长切分/重叠/前置补音）、导出（SRT/VTT/CSV/JSON/MD/ZIP）、自动分章。
 
 ## 常见问题
 
-- **没有 loopback 设备?** 确保系统正在播放声音(音量不为 0),并检查 soundcard;有的系统需在声音设置里允许应用独占音频。
-- **中文识别效果差?** 用更大模型(`small`/`medium`),或显式 `--language zh`。
-- **想要更快的实时?** 用 `small` + GPU(`float16`),或 CPU `int8` + `tiny`。
-- **输出到文件看不见?** 用 `--output all` 或 `--output-file path.txt`。
+**Q：没有声音 / 抓不到系统播放？**
+先确认系统正在播放、音量不为 0；Windows 上用 WASAPI 环回，部分应用需要允许共享音频。
+
+**Q：中文识别不准？**
+用 sherpa-onnx 的 SenseVoice 模型（仓库推荐），或换更大的 Whisper。`--language zh` 也能提高稳定性。
+
+**Q：浏览器识别是离线吗？**
+不一定。Chrome/Edge 的 Web Speech API 通常会把音频送到厂商服务器；要严格离线请用 sherpa-onnx / Vosk。
+
+**Q：翻译慢？**
+翻译在后台线程跑，原文先出、译文后补。R1 每次约 10–20 秒，属正常。
+
+**Q：exe 启动慢？**
+onedir 版本首次启动约 3–5 秒（加载 onnxruntime），之后正常。
+
+## 许可
+
+MIT

@@ -1,322 +1,192 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
+﻿<!doctype html>
+<html lang="zh-CN" data-theme="dark">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ACCS · 实时语音识别 + 翻译</title>
-<style>
-  :root { --bg:#0f1220; --panel:#1a1f33; --accent:#5b8cff; --ok:#3fd28a; --warn:#ffb454; --text:#e8ecf8; --muted:#9aa3bd; --danger:#ff6b6b; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:"Segoe UI",system-ui,"Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); }
-  .wrap { max-width:1100px; margin:0 auto; padding:20px; }
-  header h1 { margin:0 0 4px; font-size:22px; }
-  header p { margin:0 0 18px; color:var(--muted); font-size:13px; }
-  .card { background:var(--panel); border:1px solid #2a3150; border-radius:12px; padding:16px; margin-bottom:16px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; }
-  label { display:block; font-size:12px; color:var(--muted); margin-bottom:5px; }
-  select, input, button { font-size:14px; padding:8px 10px; border-radius:8px; border:1px solid #3a4266; background:#11152a; color:var(--text); width:100%; }
-  select:focus, input:focus { outline:none; border-color:var(--accent); }
-  .row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
-  .grow { flex:1; min-width:150px; }
-  button { cursor:pointer; border:none; font-weight:600; }
-  .btn { background:var(--accent); color:#fff; }
-  .btn.stop { background:var(--danger); }
-  .btn:disabled { opacity:.45; cursor:not-allowed; }
-  .toggles { display:flex; gap:18px; align-items:center; margin-top:12px; }
-  .toggles label { margin:0; display:flex; gap:6px; align-items:center; color:var(--text); font-size:14px; cursor:pointer; }
-  .toggles input[type=checkbox] { width:auto; }
-  .status { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; color:var(--muted); }
-  .dot { width:9px; height:9px; border-radius:50%; background:#555; }
-  .dot.running { background:var(--ok); box-shadow:0 0 8px var(--ok); }
-  .dot.loading { background:var(--warn); }
-  .dot.stopping { background:var(--warn); }
-  .segments { max-height:62vh; overflow-y:auto; display:flex; flex-direction:column; gap:12px; padding:4px; }
-  .seg { background:#141a2e; border:1px solid #2a3150; border-radius:10px; padding:12px 14px; }
-  .seg .meta { font-size:11px; color:var(--muted); margin-bottom:6px; }
-  .seg .text { font-size:15px; line-height:1.5; white-space:pre-wrap; }
-  .seg .trans { margin-top:8px; font-size:14px; line-height:1.5; color:#cfe3ff; border-top:1px dashed #2a3150; padding-top:8px; }
-  .seg .trans .pending { color:var(--muted); font-style:italic; }
-  .seg .error { color:var(--danger); }
-  .seg .lang { display:inline-block; background:#2a3150; padding:2px 7px; border-radius:6px; font-size:11px; margin-right:6px; }
-  .toolbar { display:flex; gap:10px; align-items:center; }
-  .toolbar .spacer { flex:1; }
-  .clear-btn { background:#2a3150; color:var(--text); }
-  .btn.accent { background:#7a5bff; }
-  .export-btn { background:#2a3150; color:var(--text); padding:8px 12px; }
-  .export-btn:hover { background:#3a4266; }
-  .analysis-text { white-space:pre-wrap; line-height:1.7; font-size:15px; background:#141a2e; border:1px solid #2a3150; border-radius:10px; padding:12px 14px; }
-  .kpoints { margin:0; padding-left:22px; line-height:1.7; font-size:15px; }
-  .kpoints li { margin-bottom:6px; }
-  .analysis-head { display:flex; align-items:center; justify-content:space-between; }
-  .hint { font-size:12px; color:var(--muted); margin-top:6px; line-height:1.5; }
-  .errbox { color:var(--danger); font-size:13px; margin-top:10px; white-space:pre-wrap; }
-</style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ACCS · 课堂实时转写</title>
+<meta name="theme-color" content="#070a14" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%237c5cff'/><path d='M9 16h2v6H9zm4-4h2v10h-2zm4 2h2v6h-2zm4-5h2v9h-2z' fill='white'/></svg>" />
+<link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>🎙️ ACCS — 实时语音识别 + 翻译</h1>
-    <p>本地 Whisper 识别讲课音频,并用本机 DeepSeek R1 把英文翻成中文。</p>
-  </header>
 
-  <div class="card">
-    <div class="grid">
-      <div class="grow">
-        <label>音频来源</label>
-        <select id="source">
-          <option value="system">系统播放声音(网课/讲座)</option>
-          <option value="mic">麦克风</option>
-          <option value="file">音频文件</option>
-        </select>
-      </div>
-      <div class="grow" id="fileWrap" style="display:none">
-        <label>音频文件(相对项目目录,如 speech_zh.wav)</label>
-        <input type="text" id="file" placeholder="speech_zh.wav" />
-      </div>
-      <div class="grow">
-        <label>Whisper 模型</label>
-        <select id="model">
-          <option>tiny</option>
-          <option selected>base</option>
-          <option>small</option>
-          <option>medium</option>
-        </select>
-      </div>
-      <div class="grow">
-        <label>语言(留空自动)</label>
-        <input id="language" placeholder="zh / en / 空=自动" />
-      </div>
-      <div class="grow">
-        <label>识别引擎</label>
-        <select id="engine">
-          <option value="sherpa_onnx" selected>sherpa-onnx·中文最佳(推荐)</option>
-          <option value="faster_whisper">faster-whisper</option>
-          <option value="openai_whisper">openai-whisper</option>
-        </select>
-      </div>
-      <div class="grow">
-        <label>中文识别模型目录(留空=自动)</label>
-        <input id="sherpaModel" placeholder="auto: models/sherpa-onnx-sense-voice-..." />
-      </div>
-    </div>
-
-    <div class="row" style="margin-top:12px">
-      <div class="grow">
-        <label>LLM 地址</label>
-        <input id="llmBase" value="http://127.0.0.1:11434" />
-      </div>
-      <div class="grow">
-        <label>LLM 模型(用于翻译)</label>
-        <input id="llmModel" value="deepseek-r1:8b" />
-      </div>
-    </div>
-
-    <div class="toggles">
-      <label><input type="checkbox" id="translate" checked /> 开启英→中翻译(DeepSeek R1)</label>
-    </div>
-
-    <div class="toolbar" style="margin-top:14px">
-      <button class="btn" id="startBtn">▶ 开始</button>
-      <button class="btn stop" id="stopBtn" disabled>■ 停止</button>
-      <span class="spacer"></span>
-      <button class="clear-btn" id="clearBtn">清空列表</button>
-    </div>
-
-    <div class="toolbar" style="margin-top:10px; flex-wrap:wrap">
-      <button class="btn accent" id="analyzeBtn">🧠 全面分析(纠错+知识点)</button>
-      <span class="spacer"></span>
-      <button class="export-btn" onclick="downloadExport('txt')">⬇ txt</button>
-      <button class="export-btn" onclick="downloadExport('md')">⬇ 课程.md</button>
-      <button class="export-btn" onclick="downloadExport('srt')">⬇ 字幕.srt</button>
-      <button class="export-btn" onclick="downloadExport('jsonl')">⬇ jsonl</button>
-    </div>
-    <div class="hint" id="analyzeHint" style="display:none">🔄 正在分析…(用本机 DeepSeek R1 纠错并提炼知识点,约几十秒)</div>
-
-    <div class="status">
-      <span class="dot" id="dot"></span>
-      <span id="statusText">未启动</span>
-    </div>
-    <div class="errbox" id="errbox" style="display:none"></div>
-    <div class="hint" id="hint">💡 用「系统播放声音」抓取正在播放的网课/讲座;也可选「音频文件」直接转写测试。英文片段会被自动翻成中文。</div>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">
+      <svg viewBox="0 0 32 32" width="24" height="24">
+        <defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+        <rect x="3" y="13" width="26" height="6" rx="3" fill="url(#g)"/>
+        <rect x="9" y="7" width="2" height="18" rx="1" fill="#e8ecf8"/>
+        <rect x="19" y="5" width="2.4" height="22" rx="1.2" fill="#e8ecf8"/>
+      </svg>
+    </span>
+    <div class="brand-text"><strong>ACCS</strong><small>课堂实时转写</small></div>
   </div>
-
-  <div class="card">
-    <div class="segments" id="segments"><div id="empty" style="color:var(--muted)">还没有内容。点击「开始」。</div></div>
+  <div class="top-status">
+    <span class="pill" id="phasePill"><i class="dot" id="phaseDot"></i><span id="phaseText">未启动</span></span>
+    <span class="pill ghost" id="enginePill">—</span>
+    <span class="pill ghost" id="segPill">0 段</span>
   </div>
+  <div class="top-actions">
+    <button class="icon-btn" id="themeBtn" title="切换深色 / 浅色">
+      <svg viewBox="0 0 24 24" width="17" height="17"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</header>
 
-  <div class="card" id="analysisCard" style="display:none">
-    <div class="analysis-head"><h2 style="margin:0; font-size:16px">📋 全面分析</h2>
-      <button class="export-btn" onclick="downloadExport('md')">⬇ 导出分析.md</button>
+<main class="shell">
+
+  <!-- ============================ 左：设置 ============================ -->
+  <aside class="panel settings">
+    <div class="panel-head"><h2>采集</h2><span class="hint" id="backendHint">后端连接中…</span></div>
+
+    <div class="field">
+      <span>音频来源</span>
+      <div class="segmented" id="sourceSeg">
+        <button data-v="system" class="active">系统声音</button>
+        <button data-v="mic">麦克风</button>
+        <button data-v="file">音频文件</button>
+        <button data-v="browser">浏览器</button>
+      </div>
     </div>
-    <h3 style="margin:14px 0 6px; font-size:14px; color:#cfe3ff">✓ 纠正后的课程内容</h3>
-    <div class="analysis-text" id="corrected"></div>
-    <h3 style="margin:16px 0 6px; font-size:14px; color:#cfe3ff">✦ 知识要点</h3>
-    <ul class="kpoints" id="kpoints"></ul>
-  </div>
-</div>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const dot = $("dot"), statusText = $("statusText"), errbox = $("errbox"), segments = $("segments");
-let running = false;
+    <label class="field" id="fileField" hidden>
+      <span>音频文件路径</span>
+      <input id="filePath" placeholder="例如 speech_zh.wav 或 D:\lecture.m4a" />
+      <small>相对项目根目录，或绝对路径</small>
+    </label>
 
-const sourceEl = $("source"), fileWrap = $("fileWrap");
-sourceEl.addEventListener("change", () => { fileWrap.style.display = sourceEl.value === "file" ? "" : "none"; });
+    <label class="field">
+      <span>识别引擎</span>
+      <select id="engine"></select>
+      <small id="engineNote">本地离线引擎，音频不出本机</small>
+    </label>
 
-function setStatus(run, phase) {
-  running = run;
-  dot.className = "dot";
-  if (phase === "loading") { dot.classList.add("loading"); }
-  else if (phase === "stopping") { dot.classList.add("stopping"); }
-  else if (run) { dot.classList.add("running"); }
-  statusText.textContent = phaseLabel(phase, run);
-  $("startBtn").disabled = run;
-  $("stopBtn").disabled = !run;
-}
-function phaseLabel(phase, run) {
-  if (phase === "loading") return "加载模型中…(首次会下载权重)";
-  if (phase === "stopping") return "正在停止…";
-  if (run) return "识别中…(同时翻译英文)";
-  return "未启动";
-}
+    <div id="engineControls"></div>
 
-function showErr(msg) { errbox.style.display = ""; errbox.textContent = msg; }
-function clearErr() { errbox.style.display = "none"; errbox.textContent = ""; }
+    <label class="field">
+      <span>语言</span>
+      <select id="language">
+        <option value="">自动检测</option>
+        <option value="zh">中文</option>
+        <option value="en">英文</option>
+        <option value="ja">日文</option>
+        <option value="ko">韩文</option>
+      </select>
+    </label>
 
-function addTranscript(start, text, language, needsTranslation) {
-  const ph = $("empty");
-  if (ph) ph.remove();
-  const el = document.createElement("div");
-  el.className = "seg";
-  el.dataset.start = start;
-  let meta = "";
-  if (language) meta += `<span class="lang">${escapeHtml(language)}</span>`;
-  meta += `${fmtTime(start)}`;
-  let html = `<div class="meta">${meta}</div>\n      <div class="text">${escapeHtml(text)}</div>`;
-  // 只有需要翻译(含英文)时才显示“译文”区并占位“翻译中…”
-  if (needsTranslation && $("translate").checked) {
-    html += `\n      <div class="trans"><span class="pending">🔄 翻译中…</span></div>`;
-  }
-  el.innerHTML = html;
-  segments.appendChild(el);
-  segments.scrollTop = segments.scrollHeight;
-}
+    <details class="acc" open>
+      <summary>分段（VAD）</summary>
+      <div class="acc-body">
+        <label class="field">
+          <span>语音阈值 <b id="vThr">0.50</b></span>
+          <input type="range" id="threshold" min="0.2" max="0.9" step="0.05" value="0.5" />
+        </label>
+        <label class="field">
+          <span>静音断句 <b id="vSil">800 ms</b></span>
+          <input type="range" id="silence" min="300" max="2000" step="50" value="800" />
+        </label>
+        <label class="field">
+          <span>最长片段 <b id="vMax">30 s</b></span>
+          <input type="range" id="maxSeg" min="10" max="60" step="5" value="30" />
+        </label>
+        <label class="field">
+          <span>片段重叠 <b id="vOvl">0 ms</b></span>
+          <input type="range" id="overlap" min="0" max="600" step="50" value="0" />
+          <small>重叠能减少边界丢字，但会重复少量内容</small>
+        </label>
+      </div>
+    </details>
 
-function updateTranslation(start, translation, isError) {
-  const el = segments.querySelector(`.seg[data-start="${start}"]`);
-  if (!el) return;
-  const trans = el.querySelector(".trans");
-  trans.innerHTML = `<div class="${isError ? "error" : ""}">🇨🇳 ${escapeHtml(translation)}</div>`;
-}
+    <details class="acc">
+      <summary>翻译与分析</summary>
+      <div class="acc-body">
+        <label class="check"><input type="checkbox" id="translate" checked /><span>英文 → 中文（本地 LLM）</span></label>
+        <label class="field"><span>LLM 地址</span><input id="llmBase" value="http://127.0.0.1:11434" /></label>
+        <label class="field"><span>LLM 模型</span><input id="llmModel" value="deepseek-r1:8b" /></label>
+        <p class="note">翻译与分析都走本机 Ollama，不联网。</p>
+      </div>
+    </details>
 
-function fmtTime(sec) {
-  sec = Number(sec) || 0;
-  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
-  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-}
-function escapeHtml(s) {
-  return String(s).replace(/[&<>]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;" }[c]));
-}
+    <div class="start-bar">
+      <button class="btn primary" id="startBtn">▶ 开始</button>
+      <button class="btn danger" id="stopBtn" disabled>■ 停止</button>
+    </div>
+  </aside>
 
-async function start() {
-  clearErr();
-  const body = {
-    source: sourceEl.value,
-    model: $("model").value,
-    engine: $("engine").value,
-    sherpa_onnx_model: $("sherpaModel").value.trim(),
-    language: $("language").value.trim(),
-    translate: $("translate").checked,
-    llm_base_url: $("llmBase").value.trim(),
-    llm_model: $("llmModel").value.trim(),
-  };
-  if (sourceEl.value === "file") {
-    if (!$("file").value.trim()) { showErr("请填写音频文件路径"); return; }
-    body.file = $("file").value.trim();
-  }
-  const resp = await fetch("/api/start", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  }).catch(e => { showErr("无法连接后端: " + e); return null; });
-  if (!resp) return;
-  const data = await resp.json();
-  if (!resp.ok) { showErr(data.detail || "启动失败"); return; }
-}
+  <!-- ============================ 中：实时字幕 ============================ -->
+  <section class="panel live">
+    <div class="live-toolbar">
+      <div class="search">
+        <svg viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="search" placeholder="搜索转写内容…" />
+      </div>
+      <label class="check sm"><input type="checkbox" id="autoscroll" checked /><span>跟随</span></label>
+      <label class="check sm"><input type="checkbox" id="showTrans" checked /><span>译文</span></label>
+      <select id="fontSize" class="mini" title="字号">
+        <option value="15">小</option>
+        <option value="17" selected>中</option>
+        <option value="19">大</option>
+      </select>
+      <button class="btn ghost sm" id="clearBtn">清空</button>
+    </div>
 
-async function stop() {
-  try { await fetch("/api/stop", { method: "POST" }); } catch (e) { showErr("停止失败: " + e); }
-}
+    <div class="segments" id="segments"></div>
 
-async function loadStatus() {
-  try {
-    const r = await fetch("/api/status"); const d = await r.json();
-    setStatus(d.running, d.phase);
-  } catch (e) { /* 后端未起 */ }
-}
+    <div class="empty" id="empty">
+      <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <p>还没有内容</p>
+      <span>选好来源和引擎，点「开始」；浏览器模式下会请求麦克风权限</span>
+    </div>
 
-$("startBtn").onclick = start;
-$("stopBtn").onclick = stop;
-$("clearBtn").onclick = () => { segments.innerHTML = '<div id="empty" style="color:var(--muted)">还没有内容。点击「开始」。</div>'; };
+    <div class="statsbar">
+      <span id="statSegs">0 段</span>
+      <span class="sep"></span>
+      <span id="statDur">00:00</span>
+      <span class="sep"></span>
+      <span id="statEngine">—</span>
+      <span class="grow"></span>
+      <span class="vad" id="vadState"><i class="dot"></i><em>等待</em></span>
+    </div>
+  </section>
 
-function downloadExport(fmt) {
-  const link = document.createElement("a");
-  link.href = "/api/export?format=" + encodeURIComponent(fmt);
-  link.download = "";  // 让后端 Content-Disposition 决定文件名
-  document.body.appendChild(link); link.click(); link.remove();
-}
+  <!-- ============================ 右：导出与分析 ============================ -->
+  <aside class="panel side">
+    <section class="side-block">
+      <div class="panel-head"><h2>导出</h2><span class="hint">全部内容</span></div>
+      <div class="export-grid">
+        <button class="exp" data-fmt="zip"><b>ZIP</b><small>全套打包</small></button>
+        <button class="exp" data-fmt="srt_bilingual"><b>SRT</b><small>双语字幕</small></button>
+        <button class="exp" data-fmt="docx"><b>DOCX</b><small>Word 文稿</small></button>
+        <button class="exp" data-fmt="csv"><b>CSV</b><small>表格</small></button>
+        <button class="exp" data-fmt="json"><b>JSON</b><small>结构化</small></button>
+        <button class="exp" data-fmt="md"><b>Markdown</b><small>带章节</small></button>
+        <button class="exp" data-fmt="srt"><b>SRT</b><small>原文</small></button>
+        <button class="exp" data-fmt="txt"><b>TXT</b><small>纯文本</small></button>
+      </div>
+    </section>
 
-$("analyzeBtn").onclick = async () => {
-  $("analyzeHint").style.display = "";
-  clearErr();
-  try {
-    const r = await fetch("/api/analyze", { method: "POST" });
-    const d = await r.json();
-    if (!r.ok) { showErr(d.detail || "分析失败"); $("analyzeHint").style.display = "none"; }
-  } catch (e) { showErr("分析请求失败: " + e); $("analyzeHint").style.display = "none"; }
-};
+    <section class="side-block">
+      <div class="panel-head"><h2>章节</h2><button class="btn ghost sm" id="chapBtn">生成</button></div>
+      <div class="chapters" id="chapters"><p class="note">按停顿自动分章</p></div>
+    </section>
 
-function renderAnalysis(data) {
-  if (!data) return;
-  if (data.error) { showErr(data.error); return; }
-  $("corrected").textContent = data.corrected || "(无纠正文本)";
-  const ul = $("kpoints"); ul.innerHTML = "";
-  (data.knowledge_points || []).forEach(k => {
-    const li = document.createElement("li"); li.textContent = k; ul.appendChild(li);
-  });
-  if (!(data.knowledge_points || []).length) ul.innerHTML = "<li style='color:var(--muted)'>未提取到知识点</li>";
-  $("analysisCard").style.display = "";
-  $("analyzeHint").style.display = "none";
-}
+    <section class="side-block">
+      <div class="panel-head"><h2>分析</h2><button class="btn ghost sm" id="analyzeBtn">运行</button></div>
+      <div class="analysis" id="analysis"><p class="note">用本地 LLM 纠错并提炼知识点</p></div>
+    </section>
+  </aside>
+</main>
 
-const es = new EventSource("/api/stream");
-es.onmessage = (ev) => {
-  let d; try { d = JSON.parse(ev.data); } catch { return; }
-  if (d.type === "reset") {
-    segments.innerHTML = "";
-    (d.segments || []).forEach(s => {
-      if (s.type === "transcript") addTranscript(s.start, s.text, s.language, s.needs_translation);
-    });
-    (d.segments || []).forEach(s => {
-      if (s.type === "translation") updateTranslation(s.start, s.translation, s.translation.startsWith("⚠"));
-    });
-  } else if (d.type === "transcript") {
-    addTranscript(d.start, d.text, d.language, d.needs_translation);
-  } else if (d.type === "translation") {
-    updateTranslation(d.start, d.translation, d.translation.startsWith("⚠"));
-  } else if (d.type === "status") {
-    setStatus(d.running, d.phase);
-  } else if (d.type === "info") {
-    statusText.textContent = d.message;
-  } else if (d.type === "error") {
-    showErr(d.message);
-    setStatus(false, "idle");
-  } else if (d.type === "analysis_status") {
-    if (d.state === "analyzing") $("analyzeHint").style.display = "";
-  } else if (d.type === "analysis") {
-    renderAnalysis(d.data);
-  }
-};
+<footer class="statusbar">
+  <span id="footStatus">就绪</span>
+  <span class="grow"></span>
+  <span class="muted" id="footInfo">ACCS v2.0 · 本地运行</span>
+</footer>
 
-loadStatus();
-</script>
+<div class="toast" id="toast"></div>
+
+<script src="/static/app.js"></script>
 </body>
 </html>
+

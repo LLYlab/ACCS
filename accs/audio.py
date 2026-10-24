@@ -1,5 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import os
 import threading
 from typing import Iterator, Optional
 
@@ -183,19 +184,76 @@ class SounddeviceSource(AudioSource):
 
 
 class FileSource(AudioSource):
-    """从本地音频文件读取(借助 faster-whisper 的 ffmpeg 解码),用于离线回放/测试。"""
+    """从本地音频文件读取。
+
+    优先用 soundfile（不依赖 ffmpeg/whisper），失败再退到 faster-whisper 的 ffmpeg 解码。
+    统一重采样到 16k 单声道。
+    """
+
+    TARGET_SR = 16000
 
     def open(self) -> None:
         if not self.cfg.file:
             raise AudioError("source=file 时必须在 audio.file 里指定音频文件路径。")
-        from faster_whisper.audio import decode_audio
 
-        self._audio = decode_audio(self.cfg.file)  # float32, 16k, mono
-        if self._audio.ndim != 1:
-            self._audio = self._audio.mean(axis=1)
-        self._audio = np.asarray(self._audio, dtype=np.float32)
-        if self._audio.size == 0:
+        audio = None
+        err = None
+        src_path, tmp_dir = self._ascii_copy(self.cfg.file)
+        try:
+            try:
+                import soundfile as sf
+                data, sr = sf.read(src_path, dtype="float32", always_2d=True)
+                if data.size:
+                    mono = data.mean(axis=1) if data.ndim == 2 else data.reshape(-1)
+                    audio = self._resample(mono, int(sr), self.TARGET_SR)
+            except Exception as e:  # pragma: no cover
+                err = e
+
+            if audio is None:
+                # 退路：ffmpeg（faster-whisper 自带解码器）
+                try:
+                    from faster_whisper.audio import decode_audio
+                    audio = decode_audio(src_path)
+                except Exception as e2:  # pragma: no cover
+                    raise AudioError(
+                        f"解码音频失败: {self.cfg.file}（soundfile: {err}; ffmpeg: {e2}）"
+                    ) from e2
+        finally:
+            if tmp_dir:
+                import shutil
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if audio.size == 0:
             raise AudioError(f"文件未解码到音频数据: {self.cfg.file}")
+        self._audio = audio
+
+    @staticmethod
+    def _ascii_copy(path: str):
+        """libsndfile 用 ANSI 路径打开文件，中文路径会失败：先复制到 ASCII 临时路径。"""
+        if all(ord(c) < 128 for c in path):
+            return path, None
+        import shutil
+        import tempfile
+        tmp_dir = tempfile.mkdtemp(prefix="accs_audio_")
+        ext = os.path.splitext(path)[1] or ".wav"
+        tmp = os.path.join(tmp_dir, "input" + ext)
+        shutil.copyfile(path, tmp)
+        return tmp, tmp_dir
+
+    @staticmethod
+    def _resample(x: np.ndarray, sr: int, target: int) -> np.ndarray:
+        if sr == target or x.size == 0:
+            return x.astype(np.float32, copy=False)
+        n = int(round(x.size * target / sr))
+        if n <= 1:
+            return x.astype(np.float32, copy=False)
+        # 线性插值（讲课时长/音质够用，且不引入额外依赖）
+        src_idx = np.linspace(0, x.size - 1, num=n, dtype=np.float64)
+        lo = np.floor(src_idx).astype(np.int64)
+        hi = np.minimum(lo + 1, x.size - 1)
+        frac = (src_idx - lo).astype(np.float32)
+        return (x[lo] * (1 - frac) + x[hi] * frac).astype(np.float32)
 
     def stream(self) -> Iterator[np.ndarray]:
         block = self.cfg.frame_size

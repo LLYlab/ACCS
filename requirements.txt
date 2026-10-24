@@ -1,22 +1,30 @@
 # ACCS — AI Capture Course Sound 依赖
-# 使用 `py -3.9 -m venv .venv && .venv\Scripts\python -m pip install -r requirements.txt`
+# py -3.9 -m venv .venv && .venv\Scripts\python -m pip install -r requirements.txt
 
-# 转录引擎(推荐, 实时低延迟)
-faster-whisper>=1.0
-# 可选: 使用 PyTorch 的官方 openai-whisper(复用已装好的 torch)
-openai-whisper>=20231117
+# 转录引擎（本地离线，至少装一个）
+sherpa-onnx>=1.10          # SenseVoice / Paraformer / 流式 Zipformer（推荐）
+faster-whisper>=1.0        # CTranslate2 Whisper
+openai-whisper>=20231117   # 原版 Whisper（复用 torch）
+
+# 可选引擎（按需取消注释）
+# vosk>=0.3                # 轻量离线；另需下载 vosk-model-* 到 models/
+# funasr>=1.1              # 阿里 FunASR；另需 modelscope
+# modelscope>=1.15
 
 # 音频采集
-soundcard>=0.4            # Windows 系统音频环回(抓取网课/播放声音)
-sounddevice>=0.4          # 麦克风(PortAudio)
-soundfile>=0.12           # 读取音频文件
+soundcard>=0.4             # Windows 系统音频环回
+sounddevice>=0.4           # 麦克风（PortAudio）
+soundfile>=0.12            # 读取音频文件
 
 # VAD 与数据
-onnxruntime>=1.16         # Silero VAD
+onnxruntime>=1.16          # Silero VAD
 numpy>=1.24
 PyYAML>=6.0
 
 # Web 界面
 fastapi>=0.110
 uvicorn>=0.29
-httpx>=0.24               # 调用本机 Ollama 做翻译
+httpx>=0.24                # 调用本机 Ollama 做翻译
+
+# 导出
+python-docx>=1.1           # DOCX 导出
