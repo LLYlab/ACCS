@@ -202,6 +202,7 @@ class StartRequest(BaseModel):
     sherpa_onnx_type: str = "auto"
     vosk_model: str = ""
     whisper_cpp_bin: str = ""
+    audio_device: str = ""      # 音频设备（系统环回/麦克风）
     language: str = ""
     device: str = "auto"
     translate: bool = True
@@ -328,6 +329,41 @@ async def models():
     return {"models": found}
 
 
+@app.get("/api/devices")
+async def devices():
+    """列出可用音频设备（系统环回 / 麦克风），供界面选择。"""
+    out = {"loopback": [], "inputs": [], "backends": [], "errors": []}
+    seen = set()
+    try:
+        import soundcard as sc
+        out["backends"].append("soundcard")
+        for m in sc.all_microphones(include_loopback=True):
+            name = getattr(m, "name", "") or ""
+            is_lb = bool(getattr(m, "isloopback", False)) or "loopback" in name.lower()
+            key = (name, is_lb)
+            if key in seen:
+                continue
+            seen.add(key)
+            item = {"name": name, "id": str(getattr(m, "id", "")), "source": "soundcard"}
+            (out["loopback"] if is_lb else out["inputs"]).append(item)
+    except Exception as e:
+        out["errors"].append("soundcard: %s" % e)
+    try:
+        import sounddevice as sd
+        out["backends"].append("sounddevice")
+        for i, d in enumerate(sd.query_devices()):
+            if d.get("max_input_channels", 0) <= 0:
+                continue
+            name = "[%d] %s" % (i, d["name"])
+            if name in seen:
+                continue
+            seen.add(name)
+            out["inputs"].append({"name": name, "id": str(i), "source": "sounddevice"})
+    except Exception as e:
+        out["errors"].append("sounddevice: %s" % e)
+    return out
+
+
 @app.get("/api/status")
 async def status():
     return {
@@ -379,6 +415,9 @@ async def start(req: StartRequest):
         "vad.overlap_ms": req.overlap_ms,
         "vad.max_segment_ms": req.max_segment_ms,
     }
+    if req.audio_device:
+        overrides["audio.system_device"] = req.audio_device
+        overrides["audio.mic_device"] = req.audio_device
     try:
         config = Config.load(overrides=overrides)
         if req.source == "file" and not req.file:

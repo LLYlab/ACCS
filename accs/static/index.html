@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8" />
@@ -48,6 +48,7 @@
         <button data-v="file">音频文件</button>
         <button data-v="browser">浏览器</button>
       </div>
+      <small id="sourceHint">系统声音抓的是「电脑正在播放」的音频；听不到就换设备，或改用麦克风。</small>
     </div>
 
     <label class="field" id="fileField" hidden>
@@ -63,6 +64,12 @@
     </label>
 
     <div id="engineControls"></div>
+
+    <label class="field" id="deviceField">
+      <span>音频设备</span>
+      <select id="device"><option value="">默认设备</option></select>
+      <small id="deviceHint">切换来源后自动刷新设备列表</small>
+    </label>
 
     <label class="field">
       <span>语言</span>
@@ -131,6 +138,8 @@
       <button class="btn ghost sm" id="clearBtn">清空</button>
     </div>
 
+    <div class="alert" id="alert" hidden></div>
+
     <div class="segments" id="segments"></div>
 
     <div class="empty" id="empty">
@@ -145,6 +154,8 @@
       <span id="statDur">00:00</span>
       <span class="sep"></span>
       <span id="statEngine">—</span>
+      <span class="sep"></span>
+      <span class="meter" title="输入电平"><i id="levelBar"></i></span>
       <span class="grow"></span>
       <span class="vad" id="vadState"><i class="dot"></i><em>等待</em></span>
     </div>

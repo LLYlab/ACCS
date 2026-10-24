@@ -16,6 +16,7 @@
     recStart: 0,
     lastFinalEnd: 0,
     autoscroll: true,
+    lastLoud: 0,
     timer: null,
   };
 
@@ -59,10 +60,10 @@
 
   /* ------------------------------------------------------------ 设置 */
   const FIELDS = ["source", "engine", "language", "threshold", "silence", "maxSeg", "overlap",
-    "translate", "llmBase", "llmModel", "filePath"];
+    "translate", "llmBase", "llmModel", "filePath", "device"];
 
   function saveSettings() {
-    const cfg = {};
+    const cfg = { source: state.source };
     FIELDS.forEach((k) => {
       const el = $("#" + k);
       if (!el) return;
@@ -79,6 +80,7 @@
       if (!el || cfg[k] === undefined) return;
       if (el.type === "checkbox") el.checked = cfg[k]; else el.value = cfg[k];
     });
+    if (cfg.device) state.savedDevice = cfg.device;
     if (cfg.source) setSource(cfg.source);
     syncRanges();
   }
@@ -98,13 +100,64 @@
   });
 
   /* ------------------------------------------------------------ 来源 */
-  function setSource(v) {
-    state.source = v;
-    $$("#sourceSeg button").forEach((b) => b.classList.toggle("active", b.dataset.v === v));
-    $("#fileField").hidden = v !== "file";
-    if (v === "browser" && state.engine !== "browser") selectEngine("browser");
+  function renderSource() {
+    $$("#sourceSeg button").forEach((b) => b.classList.toggle("active", b.dataset.v === state.source));
+    $("#fileField").hidden = state.source !== "file";
+    const df = $("#deviceField");
+    if (df) df.hidden = state.source === "file" || state.source === "browser";
+    const hints = {
+      system: "系统声音抓的是「电脑正在播放」的音频；听不到就换设备，或改用麦克风。",
+      mic: "麦克风：直接说话即可；没反应就换一个输入设备。",
+      file: "音频文件：填相对路径（如 speech_zh.wav）或绝对路径。",
+      browser: "浏览器识别：用浏览器自带的 Web Speech，可能依赖厂商在线服务。",
+    };
+    const hint = $("#sourceHint");
+    if (hint) hint.textContent = hints[state.source] || "";
   }
-  $$("#sourceSeg button").forEach((b) => b.addEventListener("click", () => { setSource(b.dataset.v); saveSettings(); }));
+
+  async function setSource(v, opts = {}) {
+    if (state.source === v) { renderSource(); return; }
+    const wasRunning = state.running;
+    state.source = v;
+    renderSource();
+    if (v === "browser" && state.engine !== "browser") {
+      await selectEngine("browser", { noRestart: true });
+    }
+    await loadDevices();
+    saveSettings();
+    if (wasRunning && !opts.noRestart) await restart();
+  }
+
+  $$("#sourceSeg button").forEach((b) => b.addEventListener("click", () => setSource(b.dataset.v)));
+
+  const deviceEl = $("#device");
+  if (deviceEl) {
+    deviceEl.addEventListener("change", async () => {
+      state.savedDevice = deviceEl.value;
+      saveSettings();
+      if (state.running) await restart();
+    });
+  }
+
+  async function loadDevices() {
+    const sel = $("#device");
+    if (!sel) return;
+    const src = state.source;
+    try {
+      const d = await api("/api/devices");
+      const list = src === "system" ? (d.loopback || []) : (d.inputs || []);
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">默认设备</option>' +
+        list.map((x) => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join("");
+      const want = state.savedDevice || cur;
+      if ([...sel.options].some((o) => o.value === want)) sel.value = want;
+      $("#deviceHint").textContent = src === "system"
+        ? (list.length ? `找到 ${list.length} 个环回设备` : "没有环回设备：确认系统正在播放声音")
+        : (list.length ? `找到 ${list.length} 个输入设备` : "没有找到输入设备");
+    } catch (e) {
+      $("#deviceHint").textContent = "读取设备失败：" + e.message;
+    }
+  }
 
   /* ------------------------------------------------------------ 引擎 */
   const WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"];
@@ -119,7 +172,8 @@
     sel.addEventListener("change", () => selectEngine(sel.value));
   }
 
-  function selectEngine(id) {
+  async function selectEngine(id, opts = {}) {
+    const wasRunning = state.running;
     state.engine = id;
     $("#engine").value = id;
     const meta = state.engines.find((e) => e.id === id);
@@ -128,7 +182,13 @@
       ? (meta.installed ? "本地离线引擎，音频不出本机" : "未安装：" + (meta.note || "缺少依赖"))
       : "";
     renderEngineControls();
-    if (id === "browser") setSource("browser");
+    if (id === "browser" && state.source !== "browser") {
+      state.source = "browser";
+      renderSource();
+      await loadDevices();
+    }
+    saveSettings();
+    if (wasRunning && !opts.noRestart) await restart();
   }
 
   function renderEngineControls() {
@@ -288,6 +348,7 @@
   function setPhase(phase, running) {
     state.phase = phase;
     state.running = running;
+    if (running && !state.lastLoud) state.lastLoud = Date.now();
     $("#phaseDot").className = "dot " + (phase === "loading" ? "loading" : phase === "stopping" ? "stopping" : (running ? "running" : ""));
     $("#phaseText").textContent =
       phase === "loading" ? "加载模型…" :
@@ -295,6 +356,7 @@
       running ? (state.mode === "browser" ? "浏览器识别中" : "识别中") : "未启动";
     $("#startBtn").disabled = running;
     $("#stopBtn").disabled = !running;
+    if (!running) $("#alert").hidden = true;
     $("#footStatus").textContent = $("#phaseText").textContent;
   }
 
@@ -302,6 +364,30 @@
     const on = stats && stats.active;
     $("#vadState").classList.toggle("on", !!on);
     $("#vadState em").textContent = on ? "检测到语音" : "等待语音";
+    if (!state.running) $("#alert").hidden = true;
+  }
+
+  function updateLevel(stats) {
+    const bar = $("#levelBar");
+    if (!bar) return;
+    const level = stats && typeof stats.level === "number" ? stats.level : 0;
+    // RMS 0.08 左右已经是很响的语音，映射到 0–100%
+    const pct = Math.max(0, Math.min(100, Math.round(level * 1200)));
+    bar.style.width = pct + "%";
+    const now = Date.now();
+    if (level > 0.008) state.lastLoud = now;
+
+    const alert = $("#alert");
+    if (!state.running || state.mode === "browser") { alert.hidden = true; return; }
+    const silentMs = now - (state.lastLoud || 0);
+    if (silentMs > 5000) {
+      alert.hidden = false;
+      alert.textContent = state.source === "system"
+        ? "已经 5 秒没拾到声音：确认电脑正在播放、音量不为 0，或在上面换一个「音频设备」。"
+        : "已经 5 秒没拾到声音：确认麦克风没被静音，或在上面换一个「音频设备」。";
+    } else {
+      alert.hidden = true;
+    }
   }
 
   /* ------------------------------------------------------------ 启动 / 停止 */
@@ -318,6 +404,7 @@
       silence_ms: Number($("#silence").value),
       max_segment_ms: Number($("#maxSeg").value) * 1000,
       overlap_ms: Number($("#overlap").value),
+      audio_device: $("#device") ? $("#device").value : "",
     };
     const wmodel = $("#wmodel");
     if (wmodel) body.model = wmodel.value;
@@ -337,7 +424,8 @@
   }
 
   async function start() {
-    if (state.running) return;
+    if (DEMO) { toast("演示模式：这是示例数据，真实识别请去掉网址里的 ?demo=1"); return; }
+    if (state.running) { toast("已经在运行，先点「停止」或直接切换配置"); return; }
     if (state.source === "file" && !$("#filePath").value.trim()) { toast("请填写音频文件路径"); return; }
     if (state.source === "browser" || state.engine === "browser") {
       try {
@@ -347,6 +435,7 @@
     }
     try {
       setPhase("loading", true);
+      $("#alert").hidden = true;
       await api("/api/start", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(collectStartBody()),
@@ -358,16 +447,30 @@
     }
   }
 
-  async function stop() {
+  /** 停止 → 等一会儿 → 用当前配置重新开始（切换音源/引擎时自动调用） */
+  async function restart() {
+    if (DEMO) return;
+    try { await stop(true); } catch (e) { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 400));
+    await start();
+  }
+
+  async function stop(silent = false) {
     if (state.rec) { try { state.rec.stop(); } catch {} state.rec = null; }
+    setPhase("stopping", true);
     try {
-      await api("/api/stop", { method: "POST" });
+      await Promise.race([
+        api("/api/stop", { method: "POST" }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000)),
+      ]);
     } catch (e) {
-      // 浏览器模式可能还没注册到后端
+      if (!silent) toast("停止超时，已重置界面状态", 4000);
+    } finally {
+      setPhase("idle", false);
+      setStats(null);
+      $("#alert").hidden = true;
+      if (!silent) toast("已停止");
     }
-    setPhase("idle", false);
-    setStats(null);
-    toast("已停止");
   }
 
   $("#startBtn").addEventListener("click", start);
@@ -443,11 +546,13 @@
         setPhase(d.phase, d.running);
       } else if (d.type === "stats") {
         setStats(d.stats);
+        updateLevel(d.stats);
       } else if (d.type === "info") {
         $("#footStatus").textContent = d.message;
       } else if (d.type === "error") {
         toast(d.message, 6000);
         $("#footStatus").textContent = d.message;
+        setPhase("idle", false);
       } else if (d.type === "analysis_status") {
         $("#analysis").innerHTML = '<p class="note">🔄 正在分析（本机 LLM）…</p>';
       } else if (d.type === "analysis") {
@@ -521,7 +626,7 @@
       const d = await api("/api/status");
       if (!state.running && d.running) setPhase(d.phase, true);
       if (state.running && !d.running) setPhase(d.phase, false);
-      if (d.stats) setStats(d.stats);
+      if (d.stats) { setStats(d.stats); updateLevel(d.stats); }
       $("#footInfo").textContent = `ACCS v2.0 · ${d.llm_online ? "LLM 在线" : "LLM 离线"} · ${d.mode}`;
     } catch { /* 后端可能未启动 */ }
   }
@@ -558,6 +663,8 @@
     loadSettings();
     syncRanges();
     loadEngines();
+    renderSource();
+    loadDevices();
     if (DEMO) {
       seedDemo();
       $("#backendHint").textContent = "演示模式";

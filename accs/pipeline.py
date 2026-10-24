@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import queue
 import threading
@@ -100,6 +100,8 @@ class Pipeline:
         last_stats = 0.0
         frames = 0
         max_prob = 0.0
+        max_level = 0.0
+        last_level = 0.0
         try:
             for frame in self.source.stream():
                 if self._stop.is_set():
@@ -108,8 +110,11 @@ class Pipeline:
                 if frame.size == 0:
                     continue
                 frames += 1
+                level = float(np.sqrt(np.mean(np.square(frame, dtype=np.float64))))
+                last_level = level
                 prob = 1.0 if self.vad is None else float(self.vad.probability(frame))
                 max_prob = max(max_prob, prob)
+                max_level = max(max_level, level)
                 if frames == 1:
                     print(f"[accs] 首帧 {frame.size} 采样, vad={getattr(self.vad, 'name', 'none')}, prob={prob:.3f}",
                           flush=True)
@@ -122,6 +127,7 @@ class Pipeline:
                     try:
                         stats = dict(self._segmenter.stats)
                         stats.update({"frames": frames, "max_prob": round(max_prob, 3),
+                                      "level": round(last_level, 4), "max_level": round(max_level, 4),
                                       "vad": getattr(self.vad, "name", "none")})
                         self.on_stats(stats)
                     except Exception:
